@@ -1,0 +1,20 @@
+cd /home/jokerwu/study/YOLO/PyTorch_YOLOv4/breast
+rm Annotations/*
+rm JPEGImages/*
+rm labels/*
+sudo rm labels.cache3
+
+cp /media/jokerwu/Backup/Breast/data/Wu/train_tri/*.xml Annotations/
+cp /media/jokerwu/Backup/Breast/data/Wu/train_tri/*.jpg JPEGImages/
+cd ..
+python maketxt.py
+cd /media/jokerwu/Backup/Breast/data/Wu/test
+basename -s .jpg $(ls *.jpg) > test.txt
+mv test.txt /home/jokerwu/study/YOLO/PyTorch_YOLOv4/breast/ImageSets/Main && cd /home/jokerwu/study/YOLO/PyTorch_YOLOv4/breast
+cp /media/jokerwu/Backup/Breast/data/Wu/test/*.xml Annotations/
+cp /media/jokerwu/Backup/Breast/data/Wu/test/*.jpg JPEGImages/
+cd ..
+python voc_label.py
+
+sudo docker start yolov4
+sudo docker attach yolov4
