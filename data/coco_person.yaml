@@ -1,6 +1,6 @@
 # train and val datasets (image directory or *.txt file with image paths)
-train: ./data/train2017.txt  # 118k images
-val: ./data/val2017.txt  # 5k images
+train: ../coco/train2017.txt  # 64115 images
+val: ../coco/val2017.txt  # 2693 images
 # test: ../coco/testdev2017.txt  # 20k images for submission to https://competitions.codalab.org/competitions/20794
 
 # number of classes

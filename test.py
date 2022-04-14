@@ -207,12 +207,12 @@ def test(data,
                 # 一个包含嵌套字典的列表的数据结构，存储一个box对应的数据信息
                 box_data = [{"position": {"minX": xyxy[0], "minY": xyxy[1], "maxX": xyxy[2], "maxY": xyxy[3]},
                              "class_id": int(cls),
-                             "box_caption": "%s %.3f" % (names[cls], conf),
+                             "box_caption": "%s %.3f" % (names[int(cls)], conf),
                              "scores": {"class_score": conf},
                              "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
                 boxes = {"predictions": {"box_data": box_data, "class_labels": names}}
                 # 记录每一张图片 每一个box的相关信息 wandb_images 初始化为一个空列表
-                wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
+                # wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
 
             # Clip boxes to image bounds
             # 将boxes的坐标(x1y1x2y2 左上角右下角)限定在图像的尺寸(height, width)内
@@ -277,11 +277,11 @@ def test(data,
             stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
 
         # Plot images 画出前三个图片的ground truth和 对应的预测框
-        if plots and batch_i < 3:
-            f = save_dir / f'test_batch{batch_i}_labels.jpg'  # filename
-            plot_images(img, targets, paths, f, names)  # labels
-            f = save_dir / f'test_batch{batch_i}_pred.jpg'
-            plot_images(img, output_to_target(output, width, height), paths, f, names)  # predictions
+        # if plots and batch_i < 3:
+        #     f = save_dir / f'test_batch{batch_i}_labels.jpg'  # filename
+        #     plot_images(img, targets, paths, f, names)  # labels
+        #     f = save_dir / f'test_batch{batch_i}_pred.jpg'
+            # plot_images(img, output_to_target(output, width, height), paths, f, names)  # predictions
 
     # Compute statistics
     # 计算上述测试过程中的各种性能指标

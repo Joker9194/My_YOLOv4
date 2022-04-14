@@ -7,13 +7,54 @@ from utils.general import *
 import torch
 from torch import nn
 
+import ipdb
+
 try:
     from mish_cuda import MishCuda as Mish
-    
+
 except:
     class Mish(nn.Module):  # https://github.com/digantamisra98/Mish
         def forward(self, x):
             return x * F.softplus(x).tanh()
+
+
+def get_activation(name='mish', inplace=True):
+    if name == "mish":
+        module = nn.Mish(inplace=inplace)
+    elif name == "silu":
+        module = nn.SiLU(inplace=inplace)
+    elif name == "relu":
+        module = nn.ReLU(inplace=inplace)
+    elif name == "lrelu":
+        module = nn.LeakyReLU(0.1, inplace=inplace)
+    else:
+        raise AttributeError("Unsupported act type: {}".format(name))
+    return module
+
+
+class BaseConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, groups=1, bias=False, act='mish'):
+        super().__init__()
+        pad = (k_size - 1) // 2
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=pad,
+                              groups=groups, bias=bias)
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.act = get_activation(act, inplace=True)
+
+    def forward(self, x):
+        return self.act(self.bn(self.conv(x)))
+
+
+class DWConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, act="mish"):
+        super().__init__()
+        self.dconv = BaseConv(in_channels, out_channels,
+                              kernel_size=kernel_size, stride=stride, groups=in_channels, act=act)
+        self.pconv = BaseConv(in_channels, out_channels, kernel_size=1, stride=1, groups=1, act=act)
+
+    def forward(self, x):
+        x = self.dconv(x)
+        return self.pconv(x)
 
 
 class Reorg(nn.Module):
@@ -45,6 +86,7 @@ class Concat(nn.Module):
 
 class FeatureConcat(nn.Module):
     """将多个特征矩阵在channel维度进行concatenate拼接"""
+
     def __init__(self, layers):
         """
         @param layers:记录下当前需要进行concat操作的所有层的层号，比如layers=-1,-3,-5,-6
@@ -78,7 +120,8 @@ class FeatureConcat3(nn.Module):
         self.multiple = len(layers) > 1  # multiple layers flag
 
     def forward(self, x, outputs):
-        return torch.cat([outputs[self.layers[0]], outputs[self.layers[1]].detach(), outputs[self.layers[2]].detach()], 1)
+        return torch.cat([outputs[self.layers[0]], outputs[self.layers[1]].detach(), outputs[self.layers[2]].detach()],
+                         1)
 
 
 class FeatureConcat_l(nn.Module):
@@ -88,12 +131,13 @@ class FeatureConcat_l(nn.Module):
         self.multiple = len(layers) > 1  # multiple layers flag
 
     def forward(self, x, outputs):
-        return torch.cat([outputs[i][:, :outputs[i].shape[1]//2, :, :] for i in self.layers], 1) if self.multiple \
-            else outputs[self.layers[0]][:, :outputs[self.layers[0]].shape[1]//2, :, :]
+        return torch.cat([outputs[i][:, :outputs[i].shape[1] // 2, :, :] for i in self.layers], 1) if self.multiple \
+            else outputs[self.layers[0]][:, :outputs[self.layers[0]].shape[1] // 2, :, :]
 
 
 class WeightedFeatureFusion(nn.Module):  # weighted sum of 2 or more layers https://arxiv.org/abs/1911.09070
     """将多个特征矩阵的值进行融合(add操作) 只在残差结构用到"""
+
     def __init__(self, layers, weight=False):
         super(WeightedFeatureFusion, self).__init__()
         self.layers = layers  # layer indices 从当前layer往前数第3个层建立到当前层的shortcut, 实际上这里全都是[-3]
@@ -140,6 +184,7 @@ class MixConv2d(nn.Module):  # MixConv: Mixed Depthwise Convolutional Kernels ht
                         也可以看作是分组深度卷积 + Inception结构的多种卷积核混用
     论文: https://arxiv.org/abs/1907.09595.
     """
+
     def __init__(self, in_ch, out_ch, k=(3, 5, 7), stride=1, dilation=1, bias=True, method='equal_params'):
         """
         @param in_ch:  输入feature map的通道数
@@ -239,13 +284,13 @@ class DeformConv2d(nn.Module):
         # 最终在offset过后的特征图上进行卷积的那个卷积核参数设置
         self.conv = nn.Conv2d(inc, outc, kernel_size=kernel_size, stride=kernel_size, bias=bias)
         # 学习到的offset
-        self.p_conv = nn.Conv2d(inc, 2*kernel_size*kernel_size, kernel_size=3, padding=1, stride=stride)
+        self.p_conv = nn.Conv2d(inc, 2 * kernel_size * kernel_size, kernel_size=3, padding=1, stride=stride)
         nn.init.constant_(self.p_conv.weight, 0)
         self.p_conv.register_backward_hook(self._set_lr)
 
         self.modulation = modulation
         if modulation:
-            self.m_conv = nn.Conv2d(inc, kernel_size*kernel_size, kernel_size=3, padding=1, stride=stride)
+            self.m_conv = nn.Conv2d(inc, kernel_size * kernel_size, kernel_size=3, padding=1, stride=stride)
             nn.init.constant_(self.m_conv.weight, 0)
             self.m_conv.register_backward_hook(self._set_lr)
 
@@ -276,13 +321,15 @@ class DeformConv2d(nn.Module):
         q_lt = p.detach().floor()
         q_rb = q_lt + 1
 
-        q_lt = torch.cat([torch.clamp(q_lt[..., :N], 0, x.size(2)-1), torch.clamp(q_lt[..., N:], 0, x.size(3)-1)], dim=-1).long()
-        q_rb = torch.cat([torch.clamp(q_rb[..., :N], 0, x.size(2)-1), torch.clamp(q_rb[..., N:], 0, x.size(3)-1)], dim=-1).long()
+        q_lt = torch.cat([torch.clamp(q_lt[..., :N], 0, x.size(2) - 1), torch.clamp(q_lt[..., N:], 0, x.size(3) - 1)],
+                         dim=-1).long()
+        q_rb = torch.cat([torch.clamp(q_rb[..., :N], 0, x.size(2) - 1), torch.clamp(q_rb[..., N:], 0, x.size(3) - 1)],
+                         dim=-1).long()
         q_lb = torch.cat([q_lt[..., :N], q_rb[..., N:]], dim=-1)
         q_rt = torch.cat([q_rb[..., :N], q_lt[..., N:]], dim=-1)
 
         # clip p
-        p = torch.cat([torch.clamp(p[..., :N], 0, x.size(2)-1), torch.clamp(p[..., N:], 0, x.size(3)-1)], dim=-1)
+        p = torch.cat([torch.clamp(p[..., :N], 0, x.size(2) - 1), torch.clamp(p[..., N:], 0, x.size(3) - 1)], dim=-1)
 
         # bilinear kernel (b, h, w, N)
         g_lt = (1 + (q_lt[..., :N].type_as(p) - p[..., :N])) * (1 + (q_lt[..., N:].type_as(p) - p[..., N:]))
@@ -316,18 +363,18 @@ class DeformConv2d(nn.Module):
 
     def _get_p_n(self, N, dtype):
         p_n_x, p_n_y = torch.meshgrid(
-            torch.arange(-(self.kernel_size-1)//2, (self.kernel_size-1)//2+1),
-            torch.arange(-(self.kernel_size-1)//2, (self.kernel_size-1)//2+1))
+            torch.arange(-(self.kernel_size - 1) // 2, (self.kernel_size - 1) // 2 + 1),
+            torch.arange(-(self.kernel_size - 1) // 2, (self.kernel_size - 1) // 2 + 1))
         # (2N, 1)
         p_n = torch.cat([torch.flatten(p_n_x), torch.flatten(p_n_y)], 0)
-        p_n = p_n.view(1, 2*N, 1, 1).type(dtype)
+        p_n = p_n.view(1, 2 * N, 1, 1).type(dtype)
 
         return p_n
 
     def _get_p_0(self, h, w, N, dtype):
         p_0_x, p_0_y = torch.meshgrid(
-            torch.arange(1, h*self.stride+1, self.stride),
-            torch.arange(1, w*self.stride+1, self.stride))
+            torch.arange(1, h * self.stride + 1, self.stride),
+            torch.arange(1, w * self.stride + 1, self.stride))
         p_0_x = torch.flatten(p_0_x).view(1, 1, h, w).repeat(1, N, 1, 1)
         p_0_y = torch.flatten(p_0_y).view(1, 1, h, w).repeat(1, N, 1, 1)
         p_0 = torch.cat([p_0_x, p_0_y], 1).type(dtype)
@@ -335,7 +382,7 @@ class DeformConv2d(nn.Module):
         return p_0
 
     def _get_p(self, offset, dtype):
-        N, h, w = offset.size(1)//2, offset.size(2), offset.size(3)
+        N, h, w = offset.size(1) // 2, offset.size(2), offset.size(3)
 
         # (1, 2N, 1, 1)
         # 每一个采样中心点的九个值的偏移量
@@ -355,7 +402,7 @@ class DeformConv2d(nn.Module):
         x = x.contiguous().view(b, c, -1)
 
         # (b, h, w, N)
-        index = q[..., :N]*padded_w + q[..., N:]  # offset_x*w + offset_y
+        index = q[..., :N] * padded_w + q[..., N:]  # offset_x*w + offset_y
         # (b, c, h*w*N)
         index = index.contiguous().unsqueeze(dim=1).expand(-1, c, -1, -1, -1).contiguous().view(b, c, -1)
 
@@ -366,27 +413,55 @@ class DeformConv2d(nn.Module):
     @staticmethod
     def _reshape_x_offset(x_offset, ks):
         b, c, h, w, N = x_offset.size()
-        x_offset = torch.cat([x_offset[..., s:s+ks].contiguous().view(b, c, h, w*ks) for s in range(0, N, ks)], dim=-1)
-        x_offset = x_offset.contiguous().view(b, c, h*ks, w*ks)
+        x_offset = torch.cat([x_offset[..., s:s + ks].contiguous().view(b, c, h, w * ks) for s in range(0, N, ks)],
+                             dim=-1)
+        x_offset = x_offset.contiguous().view(b, c, h * ks, w * ks)
 
         return x_offset
-    
-    
+
+
 class GAP(nn.Module):
     def __init__(self):
         super(GAP, self).__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
 
     def forward(self, x):
-        #b, c, _, _ = x.size()        
+        # b, c, _, _ = x.size()
         return self.avg_pool(x)  # .view(b, c)
-    
-    
+
+
+class GMP(nn.Module):
+    def __init__(self):
+        super(GMP, self).__init__()
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+
+    def forward(self, x):
+        # b, c, _, _ = x.size()
+        return self.max_pool(x)
+
+
+class channel_avgpool(nn.Module):
+    def __init__(self):
+        super(channel_avgpool, self).__init__()
+
+    def forward(self, x):
+        return torch.mean(x, dim=1, keepdim=True)
+
+
+class channel_maxpool(nn.Module):
+    def __init__(self):
+        super(channel_maxpool, self).__init__()
+
+    def forward(self, x):
+        x, _ = torch.max(x, dim=1, keepdim=True)
+        return x
+
+
 class Silence(nn.Module):
     def __init__(self):
         super(Silence, self).__init__()
 
-    def forward(self, x):    
+    def forward(self, x):
         return x
 
 
@@ -409,17 +484,3 @@ class ScaleSpatial(nn.Module):  # weighted sum of 2 or more layers https://arxiv
         # 将SAM模块输出map和需要处理的feature map点乘
         a = outputs[self.layers[0]]
         return x * a
-
-
-class CLS_Pred(nn.Module):
-    def __init__(self, inc, outc, kernel_size=3, stride=1):
-        super(CLS_Pred, self).__init__()
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.conv = nn.Conv2d(inc, outc, kernel_size, stride)
-
-    def forward(self, x):
-        out = self.conv(x)
-        out = out.sigmoid()
-
-        return out

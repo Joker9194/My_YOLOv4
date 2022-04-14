@@ -418,8 +418,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # 将图片路径转为label的路径
         def img2label_paths(img_paths):
             # Define label paths as a function of image paths
-            # sa, sb = os.sep + 'images' + os.sep, os.sep + 'labels' + os.sep  # /images/, /labels/ substrings
-            sa, sb = os.sep + 'JPEGImages' + os.sep, os.sep + 'labels' + os.sep  # /images/, /labels/ substrings
+            sa, sb = os.sep + 'images' + os.sep, os.sep + 'labels' + os.sep  # /images/, /labels/ substrings
             return [x.replace(sa, sb, 1).replace(x.split('.')[-1], 'txt') for x in img_paths]
 
         # 得到path路径中所有图片的路径self.img_files

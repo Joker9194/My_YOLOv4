@@ -1,9 +1,12 @@
+import torch
+
 from utils.google_utils import *
 from utils.layers import *
 from utils.parse_config import *
 from utils import torch_utils
 from carafe import CARAFEPack
-from utils import CBN
+
+import ipdb
 
 ONNX_EXPORT = False
 
@@ -21,22 +24,21 @@ def create_modules(module_defs, img_size, cfg):
         model modules list, routes_binary
     """
     # Constructs module list of layer blocks from module configuration in module_defs
-    # 如果输入的img_size只是一个整数则扩展
+
     img_size = [img_size] * 2 if isinstance(img_size, int) else img_size  # expand if necessary
     _ = module_defs.pop(0)  # cfg training hyperparams (unused)
-    output_filters = [3]  # input channels 下个网络层的输入通道数
+    output_filters = [3]  # input channels
     module_list = nn.ModuleList()
     # 路由到更深层的层列表，将shortcut和route的层数都添加到里面
     routs = []  # list of layers which route to deeper layers
     yolo_index = -1
 
-    # 循环遍历module_defs
     for i, mdef in enumerate(module_defs):
         modules = nn.Sequential()
-        # 如果类型为卷积
+
         if mdef['type'] == 'convolutional':
             bn = mdef['batch_normalize']
-            filters = mdef['filters']  # 滤波器数量，也是输出通道数
+            filters = mdef['filters']
             k = mdef['size']  # kernel size
             stride = mdef['stride'] if 'stride' in mdef else (mdef['stride_y'], mdef['stride_x'])
             if isinstance(k, int):  # single-size conv
@@ -44,7 +46,6 @@ def create_modules(module_defs, img_size, cfg):
                                                        out_channels=filters,
                                                        kernel_size=k,
                                                        stride=stride,
-                                                       # 如果pad不为0，则padding为卷积核除2向下取整
                                                        padding=k // 2 if mdef['pad'] else 0,
                                                        groups=mdef['groups'] if 'groups' in mdef else 1,
                                                        bias=not bn))
@@ -59,7 +60,7 @@ def create_modules(module_defs, img_size, cfg):
                 modules.add_module('BatchNorm2d', nn.BatchNorm2d(filters, momentum=0.03, eps=1E-4))
             else:
                 routs.append(i)  # detection output (goes into yolo layer)
-            # 判断激活函数
+
             if mdef['activation'] == 'leaky':  # activation study https://github.com/ultralytics/yolov3/issues/441
                 modules.add_module('activation', nn.LeakyReLU(0.1, inplace=True))
             elif mdef['activation'] == 'swish':
@@ -72,7 +73,7 @@ def create_modules(module_defs, img_size, cfg):
                 modules.add_module('activation', nn.Sigmoid())
             elif mdef['activation'] == 'silu':
                 modules.add_module('activation', nn.SiLU())
-        # 如果是可变形卷积
+
         elif mdef['type'] == 'deformableconvolutional':
             bn = mdef['batch_normalize']
             filters = mdef['filters']
@@ -106,27 +107,24 @@ def create_modules(module_defs, img_size, cfg):
                 modules.add_module('activation', Mish())
             elif mdef['activation'] == 'silu':
                 modules.add_module('activation', nn.SiLU())
-
-        elif mdef['type'] == 'cls_pred':
-            filters = mdef['filters']
-            k = mdef['size']  # kernel size
-            stride = mdef['stride'] if 'stride' in mdef else (mdef['stride_y'], mdef['stride_x'])
-            if isinstance(k, int):
-                modules.add_module('Cls_pred', CLS_Pred(output_filters[-1],
-                                                        filters,
-                                                        kernel_size=k,
-                                                        stride=stride))
-
+                
         elif mdef['type'] == 'dropout':
             p = mdef['probability']
             modules = nn.Dropout(p)
 
-        elif mdef['type'] == 'avgpool':
+        elif mdef['type'] == 'ada_avgpool':
             modules = GAP()
 
-        elif mdef['type'] == 'reshape':
-            view = mdef['view']
-            modules = Reshape(view)
+        elif mdef['type'] == 'ada_maxpool':
+            modules = GMP()
+
+        elif mdef['type'] == 'channel_avgpool':
+            filters = 1
+            modules = channel_avgpool()
+
+        elif mdef['type'] == 'channel_maxpool':
+            filters = 1
+            modules = channel_maxpool()
 
         elif mdef['type'] == 'silence':
             filters = output_filters[-1]
@@ -214,6 +212,8 @@ def create_modules(module_defs, img_size, cfg):
             # 如果layers里面的数小于0，则加上当前层的数就是要连接的层数
             routs.extend([i + l if l < 0 else l for l in layers])
             modules = WeightedFeatureFusion(layers=layers, weight='weights_type' in mdef)
+            if mdef['activation'] == 'logistic':
+                modules.add_module('activation', nn.Sigmoid())
 
         elif mdef['type'] == 'reorg3d':  # yolov3-spp-pan-scale
             pass
@@ -245,7 +245,7 @@ def create_modules(module_defs, img_size, cfg):
                 bias.data[:, 4] += math.log(8 / (640 / stride[yolo_index]) ** 2)  # obj (8 objects per 640 image)
                 bias.data[:, 5:] += math.log(0.6 / (modules.nc - 0.99))  # cls (sigmoid(p) = 1/nc)
                 module_list[j][0].bias = torch.nn.Parameter(bias_, requires_grad=bias_.requires_grad)
-
+                
                 # j = [-2, -5, -8]
                 # for sj in j:
                 #    bias_ = module_list[sj][0].bias
@@ -314,8 +314,7 @@ class YOLOLayer(nn.Module):
             self.create_grids((img_size[1] // stride, img_size[0] // stride))  # number x, y grid points
 
     def create_grids(self, ng=(13, 13), device='cpu'):
-        # x and y grid size
-        self.nx, self.ny = ng
+        self.nx, self.ny = ng  # x and y grid size
         self.ng = torch.tensor(ng, dtype=torch.float)
 
         # build xy offsets
@@ -353,11 +352,16 @@ class YOLOLayer(nn.Module):
             bs = 1  # batch size
         else:
             bs, _, ny, nx = p.shape  # bs, 255, 13, 13
+            # cls_pred = p[:, :self.na * self.nc, :, :].view(bs, self.na, self.nc, ny, nx)
+            # reg_pred = p[:, self.na * self.nc:self.na * self.nc + self.na * 4, :, :].view(bs, self.na, 4, ny, nx)
+            # obj_pred = p[:, self.na * self.nc + self.na * 4:, :, :].view(bs, self.na, 1, ny, nx)
+            # p = torch.cat([reg_pred, obj_pred, cls_pred], 2)
             if (self.nx, self.ny) != (nx, ny):
                 self.create_grids((nx, ny), p.device)
 
-        # p.view(bs, 255, 13, 13) -- > (bs, 3, 13, 13, 85)  # (bs, anchors, grid, grid,  xywh + class + classes)
+        # p.view(bs, 255, 13, 13) -- > (bs, 3, 13, 13, 85)  # (bs, anchors, grid, grid,  xywh + obj + classes)
         p = p.view(bs, self.na, self.no, self.ny, self.nx).permute(0, 1, 3, 4, 2).contiguous()  # prediction
+        # p = p.permute(0, 1, 3, 4, 2).contiguous()
 
         if self.training:
             return p
