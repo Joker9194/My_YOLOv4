@@ -9,6 +9,8 @@ import torch
 import yaml
 from tqdm import tqdm
 
+import ipdb
+
 from utils.google_utils import attempt_load
 from utils.datasets import create_dataloader
 from utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_size, box_iou, \
@@ -28,7 +30,6 @@ def load_classes(path):
     return list(filter(None, names))  # filter removes empty strings (such as last line)
 
 
-# 测试函数， 输入为测试过程中需要的各种参数
 def test(data,
          weights=None,
          batch_size=16,
@@ -48,26 +49,22 @@ def test(data,
          log_imgs=0):  # number of logged images
 
     # Initialize/load model and set device
-    # 初始化/加载模型，并设置设备
-    training = model is not None  # 有模型则training为True
-    if training:  # called by train.py 调用train.py
+    training = model is not None
+    if training:  # called by train.py
         device = next(model.parameters()).device  # get model device
 
     else:  # called directly
-        # 调用general.py文件中的函数 设置日志 opt对象main中解析传入变量的对象
+        # 调用general.py文件中的函数，设置日志，opt为main中解析传入变量的对象
         set_logging()
         # 调用torch_utils中select_device来选择执行程序时的设备
         device = select_device(opt.device, batch_size=batch_size)
-        # 获取保存测试之后的label文件路径，格式为txt
         save_txt = opt.save_txt  # save *.txt labels
 
         # Directories
-        # 调用genera.py中的increment_path函数来设置保存文件的路径
         save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
         # Load model
-        # 加载模型
         model = Darknet(opt.cfg).to(device)
 
         # load model
@@ -77,11 +74,9 @@ def test(data,
             model.load_state_dict(ckpt['model'], strict=False)
         except:
             load_darknet_weights(model, weights[0])
-        # 调用general.py中的check_img_size函数来检查图像分辨率能否被64整除
         imgsz = check_img_size(imgsz, s=64)  # check img_size
 
     # Half
-    # 如果设备类型不是cpu，则将模型由32位浮点数转换为16位浮点数
     half = device.type != 'cpu'  # half precision only supported on CUDA
     if half:
         model.half()
@@ -96,13 +91,13 @@ def test(data,
         data = yaml.load(f, Loader=yaml.FullLoader)  # model dict
     check_dataset(data)  # check
     nc = 1 if single_cls else int(data['nc'])  # number of classes
-    iouv = torch.linspace(0.3, 0.75, 10).to(device)  # iou vector for mAP@0.3:0.75  mAP@0.3:0.75 的iou向量
+    iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
     niou = iouv.numel()  # numel为pytorch预置函数 用来获取张量中的元素个数
 
     # Logging
     log_imgs, wandb = min(log_imgs, 100), None  # ceil
     try:
-        import wandb  # Weights & Biases wandb为可视化权重和各种指标的库
+        import wandb  # Weights & Biases
     except ImportError:
         log_imgs = 0
 
@@ -123,9 +118,10 @@ def test(data,
         names = load_classes(opt.names)
     coco91class = coco80_to_coco91_class()  # 调用general.py中的函数 来转换coco的类
     # 为后续设置基于tqdm的进度条作基础
-    s = ('%20s' + '%12s' * 7) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@.5', 'mAP@.75', 'mAP@.3:.75')
+    s = ('%20s' + '%12s' * 7) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@.5', 'mAP@.75', 'mAP@.5:.95')
     # 初始化各种指标的值，t0, t1为时间
-    p, r, f1, mp, mr, map50, map75, map, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.
+    p, r, f1, mp, mr, map50, map, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
+    map75 = 0.
     # 初始化网络的loss
     loss = torch.zeros(3, device=device)
     # 初始化json文件涉及到的字典、统计信息、AP、每一类的AP、图片汇总
@@ -152,7 +148,6 @@ def test(data,
             inf_out, train_out = model(img, augment=augment)  # inference and training outputs
             # t0为累计的各个推断所用时间
             t0 += time_synchronized() - t
-
             # Compute loss 计算损失
             if training:  # if model has loss hyperparameters 训练时是否进行test
                 loss += compute_loss([x.float() for x in train_out], targets, model)[1][:3]  # box, obj, cls
@@ -207,12 +202,12 @@ def test(data,
                 # 一个包含嵌套字典的列表的数据结构，存储一个box对应的数据信息
                 box_data = [{"position": {"minX": xyxy[0], "minY": xyxy[1], "maxX": xyxy[2], "maxY": xyxy[3]},
                              "class_id": int(cls),
-                             "box_caption": "%s %.3f" % (names[int(cls)], conf),
+                             "box_caption": "%s %.3f" % (names[cls], conf),
                              "scores": {"class_score": conf},
                              "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
                 boxes = {"predictions": {"box_data": box_data, "class_labels": names}}
                 # 记录每一张图片 每一个box的相关信息 wandb_images 初始化为一个空列表
-                # wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
+                wandb_images.append(wandb.Image(img[si], boxes=boxes, caption=path.name))
 
             # Clip boxes to image bounds
             # 将boxes的坐标(x1y1x2y2 左上角右下角)限定在图像的尺寸(height, width)内
@@ -273,23 +268,25 @@ def test(data,
                                     break
 
             # Append statistics (correct, conf, pcls, tcls)
-            # # 向stats（list）中添加统计指标 格式为：(correct, conf, pcls, tcls)
+            # 向stats（list）中添加统计指标 格式为：(correct, conf, pcls, tcls)
             stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
 
-        # Plot images 画出前三个图片的ground truth和 对应的预测框
-        # if plots and batch_i < 3:
-        #     f = save_dir / f'test_batch{batch_i}_labels.jpg'  # filename
-        #     plot_images(img, targets, paths, f, names)  # labels
-        #     f = save_dir / f'test_batch{batch_i}_pred.jpg'
-            # plot_images(img, output_to_target(output, width, height), paths, f, names)  # predictions
+        # Plot images
+        if plots and batch_i < 3:
+            f = save_dir / f'test_batch{batch_i}_labels.jpg'  # filename
+            plot_images(img, targets, paths, f, names)  # labels
+            f = save_dir / f'test_batch{batch_i}_pred.jpg'
+            plot_images(img, output_to_target(output, width, height), paths, f, names)  # predictions
 
     # Compute statistics
     # 计算上述测试过程中的各种性能指标
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
     if len(stats) and stats[0].any():
         p, r, ap, f1, ap_class = ap_per_class(*stats, plot=plots, fname=save_dir / 'precision-recall_curve.png')
-        p, r, ap50, ap75, ap = p[:, 0], r[:, 0], ap[:, 4], ap[:, -1], ap.mean(1)  # [P, R, AP@0.5, AP@0.5:0.95]
-        mp, mr, map50, map75, map = p.mean(), r.mean(), ap50.mean(), ap75.mean(), ap.mean()
+        ap75 = ap[:, 5]
+        map75 = ap75.mean()
+        p, r, ap50, ap = p[:, 0], r[:, 0], ap[:, 0], ap.mean(1)  # [P, R, AP@0.5, AP@0.5:0.95]
+        mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
         nt = np.bincount(stats[3].astype(np.int64), minlength=nc)  # number of targets per class
     else:
         nt = torch.zeros(1)
@@ -301,7 +298,6 @@ def test(data,
         wandb.log({"Validation": [wandb.Image(str(x), caption=x.name) for x in sorted(save_dir.glob('test*.jpg'))]})
 
     # Print results
-    # 按照以下格式来打印测试过程的指标
     pf = '%20s' + '%12.3g' * 7  # print format
     print(pf % ('all', seen, nt.sum(), mp, mr, map50, map75, map))
 
@@ -354,7 +350,6 @@ def test(data,
     maps = np.zeros(nc) + map
     for i, c in enumerate(ap_class):
         maps[c] = ap[i]
-    # 返回对应的测试结果
     return (mp, mr, map50, map75, map, *(loss.cpu() / len(dataloader)).tolist()), maps, t
 
 
@@ -365,21 +360,19 @@ if __name__ == '__main__':
         data: 数据集配置文件地址，
         batch-size: 前向传播的批次大小，默认32
         img-size: 输入网络的图片分辨率，默认640
-        conf-thres: object置信度阈值，默认0.25
-        iou-thres: 进行NMS时IoU阈值，默认0.6
+        conf-thres: object置信度阈值，默认0.001
+        iou-thres: 进行NMS时IoU阈值，默认0.65
         task: 设置测试的类型，有val、test、study，默认val
         device: 测试的设备
         single-cls: 数据集是否只用一个类别，默认False
         augment: 测试时是否使用数据增强（TTA Test Time Augment），默认False
         verbose: 是否打印出每个类别的mAP，默认False
-        下面两个参数是auto-labelling(有点像RNN中的teaching forcing)
-        相关参数详见:https://github.com/ultralytics/yolov5/issues/1563 下面解释是作者原话
-        save-txt: traditional auto-labelling
-        save-conf: add confidences to any of the above commands
-        save-json: 是否按照coco的json格式保存预测框，并且使用cocoapi做评估（需要同样coco的json格式的标签） 默认False
-        project: 测试保存的源文件 默认runs/test
-        name:  测试保存的文件地址 默认exp  保存在runs/test/exp下
-        exist-ok: 是否存在当前文件 默认False 一般是 no exist-ok 连用  所以一般都要重新创建文件夹
+        save-txt: save results to *.txt
+        save-conf: save confidences in --save-txt labels
+        save-json: 是否按照coco的json格式保存预测框，并且使用cocoapi做评估（需要同样coco的json格式的标签），默认False
+        project: 测试保存的源文件，默认runs/test
+        name:  测试保存的文件地址，默认exp，保存在runs/test/exp下
+        exist-ok: 是否存在当前文件，默认False，一般是no exist-ok连用，所以一般都要重新创建文件夹
         cfg: 网络配置文件
         names: 数据集里类别的名称
     """
@@ -404,12 +397,12 @@ if __name__ == '__main__':
     parser.add_argument('--cfg', type=str, default='cfg/yolov4.cfg', help='*.cfg path')
     parser.add_argument('--names', type=str, default='data/coco.names', help='*.cfg path')
     opt = parser.parse_args()
-    opt.save_json |= opt.data.endswith('coco.yaml')  # |或 左右两个变量有一个为True 左边变量就为True
+    opt.save_json |= opt.data.endswith('coco.yaml')  # | 或：左右两个变量有一个为True 左边变量就为True
     opt.data = check_file(opt.data)  # check file
     print()
     print(opt)
 
-    # 如果opt.task 为val 或者 test，就正常测试 验证集/测试集
+    # 如果opt.task为val或者test，就正常验证/测试
     if opt.task in ['val', 'test']:  # run normally
         test(opt.data,
              opt.weights,

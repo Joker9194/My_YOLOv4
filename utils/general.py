@@ -18,7 +18,7 @@ import torch
 import yaml
 
 from utils.google_utils import gsutil_getsize
-from utils.metrics import fitness, fitness_p, fitness_r, fitness_ap50, fitness_ap75, fitness_ap, fitness_f
+from utils.metrics import fitness, fitness_p, fitness_r, fitness_ap50, fitness_ap, fitness_f   
 from utils.torch_utils import init_torch_seeds
 
 # Set printoptions
@@ -82,11 +82,6 @@ def check_git_status():
 
 
 def check_img_size(img_size, s=32):
-    """
-    这个函数主要用于train.py中和detect.py中，用来检查图片的长宽是否符合规定
-    检查img_size是否能被s整除，这里默认s为32，train.py test.py中设置64
-    返回大于等于img_size且是s的最小倍数
-    """
     # Verify img_size is a multiple of stride s
     new_size = make_divisible(img_size, int(s))  # ceil gs-multiple
     if new_size != img_size:
@@ -463,7 +458,7 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, merge=False, 
 
         # Batched NMS
         c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
-        # 做个切片 得到boxes和scores   不同类别的box位置信息加上一个很大的数但又不同的数c
+        # 做个切片，得到boxes和scores，不同类别的box位置信息加上一个很大的数但又不同的数c
         # 这样作非极大抑制的时候不同类别的框就不会掺和到一块了  这是一个作nms挺巧妙的技巧
         boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
         # 返回nms过滤后的bounding box(boxes)的索引（降序排列）

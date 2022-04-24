@@ -6,44 +6,38 @@ import numpy as np
 
 def fitness(x):
     # Model fitness as a weighted combination of metrics
-    w = [0.0, 0.0, 0.1, 0.2, 0.7]  # weights for [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-    return (x[:, :5] * w).sum(1)
+    w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+    return (x[:, :4] * w).sum(1)
 
 
 def fitness_p(x):
     # Model fitness as a weighted combination of metrics
-    w = [1.0, 0.0, 0.0, 0.0, 0.0]  # weights for [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-    return (x[:, :5] * w).sum(1)
+    w = [1.0, 0.0, 0.0, 0.0]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+    return (x[:, :4] * w).sum(1)
 
 
 def fitness_r(x):
     # Model fitness as a weighted combination of metrics
-    w = [0.0, 1.0, 0.0, 0.0, 0.0]  # weights for [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-    return (x[:, :5] * w).sum(1)
+    w = [0.0, 1.0, 0.0, 0.0]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+    return (x[:, :4] * w).sum(1)
 
 
 def fitness_ap50(x):
     # Model fitness as a weighted combination of metrics
-    w = [0.0, 0.0, 1.0, 0.0, 0.0]  # weights for [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-    return (x[:, :5] * w).sum(1)
-
-
-def fitness_ap75(x):
-    # Model fitness as a weighted combination of metrics
-    w = [0.0, 0.0, 0.0, 1.0, 0.0]  # weights for [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-    return (x[:, :5] * w).sum(1)
+    w = [0.0, 0.0, 1.0, 0.0]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+    return (x[:, :4] * w).sum(1)
 
 
 def fitness_ap(x):
     # Model fitness as a weighted combination of metrics
-    w = [0.0, 0.0, 0.0, 1.0, 0.0]  # weights for [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-    return (x[:, :5] * w).sum(1)
+    w = [0.0, 0.0, 0.0, 1.0]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+    return (x[:, :4] * w).sum(1)
 
 
 def fitness_f(x):
     # Model fitness as a weighted combination of metrics
-    # w = [0.0, 0.0, 0.0, 1.0]  # weights for [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-    return (x[:, 0] * x[:, 1]) / (x[:, 0] + x[:, 1])
+    #w = [0.0, 0.0, 0.0, 1.0]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+    return ((x[:, 0]*x[:, 1])/(x[:, 0]+x[:, 1]))
 
 
 def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, fname='precision-recall_curve.png'):
