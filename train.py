@@ -21,14 +21,13 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-# import test.py to get mAP after each epoch
-import test
+import test  # import test.py to get mAP after each epoch
 # from models.yolo import Model
 from models.models import *
 from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader
 from utils.general import labels_to_class_weights, increment_path, labels_to_image_weights, init_seeds, \
-    fitness, fitness_p, fitness_r, fitness_ap50, fitness_ap75, fitness_ap, fitness_f, strip_optimizer, get_latest_run,\
+    fitness, fitness_p, fitness_r, fitness_ap50, fitness_ap, fitness_f, strip_optimizer, get_latest_run,\
     check_dataset, check_file, check_git_status, check_img_size, print_mutation, set_logging
 from utils.google_utils import attempt_download
 from utils.loss import compute_loss
@@ -50,30 +49,27 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank
 
     # Directories
-    weight_dir = save_dir / 'weights'   # 权重文件夹
+    weight_dir = save_dir / 'weights'
     weight_dir.mkdir(parents=True, exist_ok=True)  # make dir
-    last = weight_dir / 'last.pt'   # 最后一次的权重
-    best = weight_dir / 'best.pt'   # 最好一次的权重
-    results_file = save_dir / 'results.txt'  # 将结果保存到txt文件中
+    last = weight_dir / 'last.pt'
+    best = weight_dir / 'best.pt'
+    results_file = save_dir / 'results.txt'
 
-    # Save run settings 保存超参和配置
+    # Save run settings
     with open(save_dir / 'hyp.yaml', 'w') as f:
         yaml.dump(hyp, f, sort_keys=False)
     with open(save_dir / 'opt.yaml', 'w') as f:
         yaml.dump(vars(opt), f, sort_keys=False)
 
     # Configure
-    # 是否需要画图: 所有的labels信息、前三次迭代的barch、训练结果等
     plots = not opt.evolve  # create plots
     cuda = device.type != 'cpu'
     # 设置随机种子
     init_seeds(2 + rank)
-    # 加载data.yaml中的数据配置信息
     with open(opt.data) as f:
         data_dict = yaml.load(f, Loader=yaml.FullLoader)  # data dict
-
     with torch_distributed_zero_first(rank):
-        check_dataset(data_dict)  # check 检查数据集，如果本地没有则从torch库下载并解压
+        check_dataset(data_dict)  # check
     # 获取训练集、测试集路径
     train_path = data_dict['train']
     test_path = data_dict['val']
@@ -138,13 +134,11 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
         else:
             pg0.append(v)  # all else
 
-    # 选用优化器，并设置pg0组的优化方式
     if opt.adam:
         optimizer = optim.Adam(pg0, lr=hyp['lr0'], betas=(hyp['momentum'], 0.999))  # adjust beta1 to momentum
     else:
         optimizer = optim.SGD(pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True)
 
-    # 设置weight，bias的优化方式，
     optimizer.add_param_group({'params': pg1, 'weight_decay': hyp['weight_decay']})  # add pg1 with weight_decay
     optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
     logger.info('\nOptimizer groups: %g .bias, %g conv.weight, %g other' % (len(pg2), len(pg1), len(pg0)))
@@ -172,8 +166,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     # best_fitness是以[0.0, 0.0, 0.1, 0.9]为系数并乘以[精确度, 召回率, mAP@0.5, mAP@0.5:0.95]再求和所得
     # 根据best_fitness来保存best.pt， 下同
     start_epoch, best_fitness = 0, 0.0
-    best_fitness_p, best_fitness_r, best_fitness_ap50, best_fitness_ap75, best_fitness_ap, best_fitness_f \
-        = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    best_fitness_p, best_fitness_r, best_fitness_ap50, best_fitness_ap, best_fitness_f = 0.0, 0.0, 0.0, 0.0, 0.0
     if pretrained:
         # Optimizer
         # 加载优化器和best_fitness*
@@ -183,8 +176,6 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
             best_fitness_p = ckpt['best_fitness_p']
             best_fitness_r = ckpt['best_fitness_r']
             best_fitness_ap50 = ckpt['best_fitness_ap50']
-            if ckpt['best_fitness_ap75']:
-                best_fitness_ap75 = ckpt['best_fitness_ap75']
             best_fitness_ap = ckpt['best_fitness_ap']
             best_fitness_f = ckpt['best_fitness_f']
 
@@ -296,7 +287,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
     # 初始化map和result
     maps = np.zeros(nc)  # mAP per class
-    results = (0, 0, 0, 0, 0, 0, 0, 0)  # P, R, mAP@.5, mAP@.75, mAP@.3-.75, val_loss(box, obj, cls)
+    results = (0, 0, 0, 0, 0, 0, 0, 0)  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
     # 设置学习率衰减所进行到的轮次，目的是中断训练后，--resume接着训练也能正常的衔接之前的训练进行学习率衰减
     scheduler.last_epoch = start_epoch - 1  # do not move
     # 通过torch自带的api设置混合精度训练
@@ -467,12 +458,12 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                                                  single_cls=opt.single_cls,
                                                  dataloader=testloader,
                                                  save_dir=save_dir,
-                                                 plots=plots and final_epoch,
+                                                  plots=plots and final_epoch,
                                                  log_imgs=opt.log_imgs if wandb else 0)
 
             # Write  # 将测试结果写入result.txt中
             with open(results_file, 'a') as f:
-                f.write(s + '%10.4g' * 8 % results + '\n')  # P, R, mAP@.5, mAP@.75, mAP@.3-.75, val_loss(box, obj, cls)
+                f.write(s + '%10.4g' * 8 % results + '\n')  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
             if len(opt.name) and opt.bucket:
                 os.system('gsutil cp %s gs://%s/results/results%s.txt' % (results_file, opt.bucket, opt.name))
 
@@ -480,7 +471,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
             # tensorboard 网页端显示训练信息
             tags = ['train/box_loss', 'train/obj_loss', 'train/cls_loss',  # train loss
                     'metrics/precision', 'metrics/recall',
-                    'metrics/mAP_0.5', 'metrics/mAP_0.75', 'metrics/mAP_0.3:0.75',
+                    'metrics/mAP_0.5', 'metrics/mAP_0.75', 'metrics/mAP_0.5:0.95',
                     'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss
                     'x/lr0', 'x/lr1', 'x/lr2']  # params
             for x, tag in zip(list(mloss[:-1]) + list(results) + lr, tags):
@@ -490,21 +481,13 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                     wandb.log({tag: x})  # W&B
 
             # Update best mAP
-            # weighted combination of [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-            fi = fitness(np.array(results).reshape(1, -1))
-            # weighted combination of [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-            fi_p = fitness_p(np.array(results).reshape(1, -1))
-            # weighted combination of [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-            fi_r = fitness_r(np.array(results).reshape(1, -1))
-            # weighted combination of [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-            fi_ap50 = fitness_ap50(np.array(results).reshape(1, -1))
-            # weighted combination of [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-            fi_ap75 = fitness_ap75(np.array(results).reshape(1, -1))
-            # weighted combination of [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-            fi_ap = fitness_ap(np.array(results).reshape(1, -1))
+            fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
+            fi_p = fitness_p(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
+            fi_r = fitness_r(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
+            fi_ap50 = fitness_ap50(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
+            fi_ap = fitness_ap(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
             if (fi_p > 0.0) or (fi_r > 0.0):
-                # weighted combination of [P, R, mAP@0.5, mAP@0.75, mAP@0.3:0.75]
-                fi_f = fitness_f(np.array(results).reshape(1, -1))
+                fi_f = fitness_f(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
             else:
                 fi_f = 0.0
             if fi > best_fitness:
@@ -515,8 +498,6 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                 best_fitness_r = fi_r
             if fi_ap50 > best_fitness_ap50:
                 best_fitness_ap50 = fi_ap50
-            if fi_ap75 > best_fitness_ap75:
-                best_fitness_ap75 = fi_ap75
             if fi_ap > best_fitness_ap:
                 best_fitness_ap = fi_ap
             if fi_f > best_fitness_f:
@@ -535,7 +516,6 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                             'best_fitness_p': best_fitness_p,
                             'best_fitness_r': best_fitness_r,
                             'best_fitness_ap50': best_fitness_ap50,
-                            'best_fitness_ap75': best_fitness_ap75,
                             'best_fitness_ap': best_fitness_ap,
                             'best_fitness_f': best_fitness_f,
                             'training_results': f.read(),
@@ -557,8 +537,6 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                     torch.save(ckpt, weight_dir / 'best_r.pt')
                 if best_fitness_ap50 == fi_ap50:
                     torch.save(ckpt, weight_dir / 'best_ap50.pt')
-                if best_fitness_ap75 == fi_ap75:
-                    torch.save(ckpt, weight_dir / 'best_ap75.pt')
                 if best_fitness_ap == fi_ap:
                     torch.save(ckpt, weight_dir / 'best_ap.pt')
                 if best_fitness_f == fi_f:
@@ -569,7 +547,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                     torch.save(ckpt, weight_dir / 'epoch_{:03d}.pt'.format(epoch))
                 if epoch >= (epochs-5):
                     torch.save(ckpt, weight_dir / 'last_{:03d}.pt'.format(epoch))
-                elif epoch >= 420: 
+                elif epoch >= 420:
                     torch.save(ckpt, weight_dir / 'last_{:03d}.pt'.format(epoch))
                 del ckpt
     # end epoch ----------------------------------------------------------------------------------------------------
@@ -665,9 +643,8 @@ if __name__ == '__main__':
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     opt = parser.parse_args()
-    # ipdb.set_trace()
 
-    # Set DDP variables 分布式训练变量
+    # Set DDP variables
     opt.total_batch_size = opt.batch_size
     opt.world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1     # 进程总数
     opt.global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1       # 进程序号
@@ -675,7 +652,7 @@ if __name__ == '__main__':
     if opt.global_rank in [-1, 0]:
         check_git_status()
 
-    # Resume 恢复
+    # Resume
     if opt.resume:  # resume an interrupted run
         ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run()  # specified or most recent path
         assert os.path.isfile(ckpt), 'ERROR: --resume checkpoint does not exist'

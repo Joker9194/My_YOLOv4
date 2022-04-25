@@ -319,7 +319,8 @@ def test(data,
     # 在更多的目标检测场合下 为保证公正测试集标签不会给出 因此以下过程应进行修改
     if save_json and len(jdict):
         w = Path(weights[0] if isinstance(weights, list) else weights).stem if weights is not None else ''  # weights
-        anno_json = glob.glob('../coco/annotations/instances_val*.json')[0]  # annotations json
+        # anno_json = glob.glob('../coco/annotations/instances_val*.json')[0]  # annotations json
+        anno_json = glob.glob('./breast/instances_val*.json')[0]  # annotations json
         pred_json = str(save_dir / f"{w}_predictions.json")  # predictions json
         print('\nEvaluating pycocotools mAP... saving %s...' % pred_json)
         with open(pred_json, 'w') as f:

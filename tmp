@@ -1,18 +1,18 @@
 cd /home/jokerwu/study/YOLO/PyTorch_YOLOv4/breast
 rm Annotations/*
-rm JPEGImages/*
+rm images/*
 rm labels/*
 sudo rm labels.cache3
 
-cp /media/jokerwu/Backup/Breast/data/Wu/train_tri/*.xml Annotations/
-cp /media/jokerwu/Backup/Breast/data/Wu/train_tri/*.jpg JPEGImages/
+cp /media/jokerwu/Backup/Breast/data/Wu/934_shuffle/flod-0/train_tri/*.xml Annotations/
+cp /media/jokerwu/Backup/Breast/data/Wu/934_shuffle/flod-0/train_tri/*.jpg images/
 cd ..
 python maketxt.py
-cd /media/jokerwu/Backup/Breast/data/Wu/test
+cd /media/jokerwu/Backup/Breast/data/Wu/934_shuffle/flod-0/test
 basename -s .jpg $(ls *.jpg) > test.txt
 mv test.txt /home/jokerwu/study/YOLO/PyTorch_YOLOv4/breast/ImageSets/Main && cd /home/jokerwu/study/YOLO/PyTorch_YOLOv4/breast
-cp /media/jokerwu/Backup/Breast/data/Wu/test/*.xml Annotations/
-cp /media/jokerwu/Backup/Breast/data/Wu/test/*.jpg JPEGImages/
+cp /media/jokerwu/Backup/Breast/data/Wu/934_shuffle/flod-0/test/*.xml Annotations/
+cp /media/jokerwu/Backup/Breast/data/Wu/934_shuffle/flod-0/test/*.jpg images/
 cd ..
 python voc_label.py
 
